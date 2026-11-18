@@ -27,23 +27,19 @@ def main(docker_image, num_workers, no_docker_pull, session_dir):
     if num_workers is None:
         num_workers = multiprocessing.cpu_count()
 
-    # pull docker
-    if not no_docker_pull:
-        print(f"Pulling docker image {docker_image}")
-        cmd = [
-            'docker',
-            'pull',
-            docker_image
-        ]
-        p = subprocess.run(cmd)
-        if p.returncode != 0:
-            print("Docker pull failed!")
-            exit(1)
-
     for session in session_dir:
         input_dir = pathlib.Path(os.path.expanduser(session)).joinpath('demos')
         input_video_dirs = [x.parent for x in input_dir.glob('*/raw_video.mp4')]
         print(f'Found {len(input_video_dirs)} video dirs')
+        # Insta360 demos arrive with imu_data.json already, so the extractor image is often unneeded.
+        needs_extraction = any(not d.joinpath('imu_data.json').is_file() for d in input_video_dirs)
+        if needs_extraction and not no_docker_pull:
+            print(f"Pulling docker image {docker_image}")
+            p = subprocess.run(['docker', 'pull', docker_image])
+            if p.returncode != 0:
+                print("Docker pull failed!")
+                exit(1)
+            no_docker_pull = True
 
         with tqdm(total=len(input_video_dirs)) as pbar:
             # one chunk per thread, therefore no synchronization needed

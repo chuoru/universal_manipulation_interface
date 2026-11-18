@@ -13,6 +13,7 @@ os.chdir(ROOT_DIR)
 import pathlib
 import click
 import subprocess
+import shutil
 import multiprocessing
 import concurrent.futures
 from tqdm import tqdm
@@ -43,8 +44,10 @@ def runner(cmd, cwd, stdout_path, stderr_path, timeout, **kwargs):
 @click.option('-n', '--num_workers', type=int, default=None)
 @click.option('-ml', '--max_lost_frames', type=int, default=60)
 @click.option('-tm', '--timeout_multiple', type=float, default=16, help='timeout_multiple * duration = timeout')
+@click.option('-s', '--setting', default=None, help='ORB_SLAM3 settings yaml on the host. Defaults to the GoPro 10 setting baked into the image.')
+@click.option('--mask', default=None, help='SLAM mask png (255 = ignored) used instead of the GoPro gripper mask.')
 @click.option('-np', '--no_docker_pull', is_flag=True, default=False, help="pull docker image from docker hub")
-def main(input_dir, map_path, docker_image, num_workers, max_lost_frames, timeout_multiple, no_docker_pull):
+def main(input_dir, map_path, docker_image, num_workers, max_lost_frames, timeout_multiple, setting, mask, no_docker_pull):
     input_dir = pathlib.Path(os.path.expanduser(input_dir)).absolute()
     input_video_dirs = [x.parent for x in input_dir.glob('demo*/raw_video.mp4')]
     input_video_dirs += [x.parent for x in input_dir.glob('map*/raw_video.mp4')]
@@ -72,6 +75,12 @@ def main(input_dir, map_path, docker_image, num_workers, max_lost_frames, timeou
             print("Docker pull failed!")
             exit(1)
 
+    setting_target, setting_volume = '/ORB_SLAM3/Examples/Monocular-Inertial/gopro10_maxlens_fisheye_setting_v1_720.yaml', []
+    if setting is not None:
+        setting = pathlib.Path(os.path.expanduser(setting)).absolute()
+        setting_target = '/setting/' + setting.name
+        setting_volume = ['--volume', str(setting.parent) + ':/setting']
+
     with tqdm(total=len(input_video_dirs)) as pbar:
         # one chunk per thread, therefore no synchronization needed
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -96,10 +105,13 @@ def main(input_dir, map_path, docker_image, num_workers, max_lost_frames, timeou
                     duration_sec = float(video.duration * video.time_base)
                 timeout = duration_sec * timeout_multiple
                 
-                slam_mask = np.zeros((2028, 2704), dtype=np.uint8)
-                slam_mask = draw_predefined_mask(
-                    slam_mask, color=255, mirror=True, gripper=False, finger=True)
-                cv2.imwrite(str(mask_write_path.absolute()), slam_mask)
+                if mask is not None:
+                    shutil.copyfile(os.path.expanduser(mask), mask_write_path)
+                else:
+                    slam_mask = np.zeros((2028, 2704), dtype=np.uint8)
+                    slam_mask = draw_predefined_mask(
+                        slam_mask, color=255, mirror=True, gripper=False, finger=True)
+                    cv2.imwrite(str(mask_write_path.absolute()), slam_mask)
 
                 map_mount_source = map_path
                 map_mount_target = pathlib.Path('/map').joinpath(map_mount_source.name)
@@ -109,12 +121,13 @@ def main(input_dir, map_path, docker_image, num_workers, max_lost_frames, timeou
                     'docker',
                     'run',
                     '--rm', # delete after finish
+                    *setting_volume,
                     '--volume', str(video_dir) + ':' + '/data',
                     '--volume', str(map_mount_source.parent) + ':' + str(map_mount_target.parent),
                     docker_image,
                     '/ORB_SLAM3/Examples/Monocular-Inertial/gopro_slam',
                     '--vocabulary', '/ORB_SLAM3/Vocabulary/ORBvoc.txt',
-                    '--setting', '/ORB_SLAM3/Examples/Monocular-Inertial/gopro10_maxlens_fisheye_setting_v1_720.yaml',
+                    '--setting', setting_target,
                     '--input_video', str(video_path),
                     '--input_imu_json', str(json_path),
                     '--output_trajectory_csv', str(csv_path),

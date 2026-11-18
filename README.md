@@ -76,6 +76,28 @@ Generate dataset for training.
 (umi)$ python scripts_slam_pipeline/07_generate_replay_buffer.py -o example_demo_session/dataset.zarr.zip example_demo_session
 ```
 
+### Using an Insta360 camera instead of a GoPro
+The pipeline also accepts `.insv` clips from an Insta360 X3 recorded in the packed dual-fisheye mode (one 3840x1920 video stream). Each clip carries 1000 Hz IMU data and Insta360's factory lens calibration. The pipeline keeps one lens, lens 1 by default, which faces the gripper on our mount.
+
+Build a calibration dir once per camera. Give it a clip where the camera is rotated briskly about all three axes for 20 to 60 seconds, so the camera-IMU rotation can be estimated from gyro against visual rotation:
+```console
+(umi)$ python scripts/insta360_calibration.py -i VID_xxx.insv -o data/insta360_calib --lens 1
+```
+Check `cam_imu_report.json`. If its `source` says `default`, the clip did not rotate enough to estimate from. For lens 1 the default rotation is the Basalt calibration of X3 `IAQEB2606EEWG9` from RoboManipBaselines. Lens 1 always takes its translation from that same calibration. For lens 0, or for another camera, the default is an unverified guess with zero translation.
+
+Record straight into a session with the camera on USB in Android mode, using the Python that has pyinsta360 installed (Python 3.10+). Each take records until Enter, or for `--seconds N`, and downloads the `.insv` under the name step 00 expects:
+```console
+$ python scripts/insta360_record.py <session> --kind mapping
+$ python scripts/insta360_record.py <session> --kind gripper_calibration
+$ python scripts/insta360_record.py <session>
+```
+
+Or copy the session's `.insv` files into `<session>/raw_videos/` yourself. Then run the pipeline with that calibration dir:
+```console
+(umi)$ python run_slam_pipeline.py <session> -c data/insta360_calib
+```
+`00_convert_insv.py` turns each clip into a single-lens `.mp4` and an `imu_data.json` with the same metadata GoPro files carry, then moves the `.insv` to `<session>/raw_insv/`. Steps 02 and 03 read `slam_setting.yaml` and `slam_mask.png` from the calibration dir. The mask covers only the area outside the lens field of view. Paint your gripper and fingers into it (255 = ignored) before mapping.
+
 ## Training Diffusion Policy
 Single-GPU training. Tested to work on RTX3090 24GB.
 ```console

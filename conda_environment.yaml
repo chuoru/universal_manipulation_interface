@@ -40,6 +40,8 @@ dependencies:
   - exiftool=12
   - aiohttp=3.9
   - aiofiles=23.2
+  # egl_probe (via robomimic) builds with cmake and rejects CMake 4
+  - cmake<4
   - pip:
     - ray[default]==2.8.0
     - threadpoolctl==3.2
@@ -57,3 +59,5 @@ dependencies:
     - robosuite @ https://github.com/cheng-chi/robosuite/archive/3f2c3116f1c0a1916e94bfa28da4d055927d1ab3.tar.gz
     # implicitly depend on conda package exiftool
     - PyExifTool==0.5
+    # reads the IMU and lens calibration from Insta360 .insv files
+    - telemetry-parser==0.4.0

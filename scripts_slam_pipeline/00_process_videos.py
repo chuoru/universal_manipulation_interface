@@ -16,6 +16,19 @@ import shutil
 from exiftool import ExifToolHelper
 from umi.common.timecode_util import mp4_get_start_datetime
 
+IMU_SIDECAR_SUFFIX = '.imu_data.json'
+
+
+def move_video(src, dst):
+    """Move a video together with the IMU sidecar 00_convert_insv.py writes for Insta360 clips."""
+    src, dst = pathlib.Path(src), pathlib.Path(dst)
+    sidecar = src.with_name(src.stem + IMU_SIDECAR_SUFFIX)
+    shutil.move(src, dst)
+    if sidecar.is_file():
+        dst_sidecar = dst.parent.joinpath('imu_data.json') if dst.name == 'raw_video.mp4' \
+            else dst.with_name(dst.stem + IMU_SIDECAR_SUFFIX)
+        shutil.move(sidecar, dst_sidecar)
+
 # %%
 @click.command(help='Session directories. Assumming mp4 videos are in <session_dir>/raw_videos')
 @click.argument('session_dir', nargs=-1)
@@ -32,7 +45,7 @@ def main(session_dir):
             print(f"{input_dir.name} subdir don't exits! Creating one and moving all mp4 videos inside.")
             for mp4_path in list(session.glob('**/*.MP4')) + list(session.glob('**/*.mp4')):
                 out_path = input_dir.joinpath(mp4_path.name)
-                shutil.move(mp4_path, out_path)
+                move_video(mp4_path, out_path)
         
         # create mapping video if don't exist
         mapping_vid_path = input_dir.joinpath('mapping.mp4')
@@ -44,7 +57,7 @@ def main(session_dir):
                 if size > max_size:
                     max_size = size
                     max_path = mp4_path
-            shutil.move(max_path, mapping_vid_path)
+            move_video(max_path, mapping_vid_path)
             print(f"raw_videos/mapping.mp4 don't exist! Renaming largest file {max_path.name}.")
         
         # create gripper calibration video if don't exist
@@ -75,7 +88,7 @@ def main(session_dir):
             for serial, path in serial_path_dict.items():
                 print(f"Selected {path.name} for camera serial {serial}")
                 out_path = gripper_cal_dir.joinpath(path.name)
-                shutil.move(path, out_path)
+                move_video(path, out_path)
 
         # look for mp4 video in all subdirectories in input_dir
         input_mp4_paths = list(input_dir.glob('**/*.MP4')) + list(input_dir.glob('**/*.mp4'))
@@ -105,7 +118,7 @@ def main(session_dir):
                 # move videos
                 vfname = 'raw_video.mp4'
                 out_video_path = this_out_dir.joinpath(vfname)
-                shutil.move(mp4_path, out_video_path)
+                move_video(mp4_path, out_video_path)
 
                 # create symlink back from original location
                 # relative_to's walk_up argument is not avaliable until python 3.12

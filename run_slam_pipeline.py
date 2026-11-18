@@ -26,9 +26,21 @@ def main(session_dir, calibration_dir):
     else:
         calibration_dir = pathlib.Path(calibration_dir)
     assert calibration_dir.is_dir()
+    # A dir made by scripts/insta360_calibration.py carries its own SLAM setting, mask and intrinsics.
+    slam_setting = calibration_dir.joinpath('slam_setting.yaml')
+    slam_args = []
+    camera_intrinsics = calibration_dir.joinpath('gopro_intrinsics_2_7k.json')
+    if slam_setting.is_file():
+        slam_args = ['--setting', str(slam_setting), '--mask', str(calibration_dir.joinpath('slam_mask.png'))]
+        camera_intrinsics = calibration_dir.joinpath('camera_intrinsics.json')
 
     for session in session_dir:
         session = pathlib.Path(os.path.expanduser(session)).absolute()
+
+        print("############## 00_convert_insv #############")
+        script_path = script_dir.joinpath("00_convert_insv.py")
+        result = subprocess.run(['python', str(script_path), str(session)])
+        assert result.returncode == 0
 
         print("############## 00_process_videos #############")
         script_path = script_dir.joinpath("00_process_videos.py")
@@ -62,7 +74,7 @@ def main(session_dir, calibration_dir):
                 'python', str(script_path),
                 '--input_dir', str(mapping_dir),
                 '--map_path', str(map_path)
-            ]
+            ] + slam_args
             result = subprocess.run(cmd)
             assert result.returncode == 0
             assert map_path.is_file()
@@ -74,14 +86,13 @@ def main(session_dir, calibration_dir):
             'python', str(script_path),
             '--input_dir', str(demo_dir),
             '--map_path', str(map_path)
-        ]
+        ] + slam_args
         result = subprocess.run(cmd)
         assert result.returncode == 0
 
         print("############# 04_detect_aruco ###########")
         script_path = script_dir.joinpath("04_detect_aruco.py")
         assert script_path.is_file()
-        camera_intrinsics = calibration_dir.joinpath('gopro_intrinsics_2_7k.json')
         aruco_config = calibration_dir.joinpath('aruco_config.yaml')
         assert camera_intrinsics.is_file()
         assert aruco_config.is_file()
