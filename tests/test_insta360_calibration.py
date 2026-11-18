@@ -13,7 +13,7 @@ cal = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cal)
 
 # Lens 1 of an Insta360 X3, factory calibration scaled to a 1920 px lens image.
-X3_LENS = MeiLens(xi=1.94817, fx=1490.4, fy=1490.1, cx=957.1, cy=962.8,
+X3_LENS = MeiLens(xi=1.94817, fx=1540.11, fy=1539.78, cx=957.02, cy=962.85,
                   k=(0.40238833, 1.20215559, -3.80487084), p=(0.00107035, -0.00236576), size=1920)
 
 

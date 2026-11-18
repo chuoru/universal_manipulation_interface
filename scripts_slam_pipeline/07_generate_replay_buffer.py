@@ -149,11 +149,6 @@ def main(input, output, out_res, out_fov, compression_level,
     
     print(f"{len(all_videos)} videos used in total!")
     
-    # get image size
-    with av.open(vid_args[0][0]) as container:
-        in_stream = container.streams.video[0]
-        ih, iw = in_stream.height, in_stream.width
-    
     # dump images
     img_compressor = JpegXl(level=compression_level, numthreads=1)
     for cam_id in range(n_cameras):
@@ -169,6 +164,10 @@ def main(input, output, out_res, out_fov, compression_level,
     def video_to_zarr(replay_buffer, mp4_path, tasks):
         pkl_path = os.path.join(os.path.dirname(mp4_path), 'tag_detection.pkl')
         tag_detection_results = pickle.load(open(pkl_path, 'rb'))
+        # Sessions can mix camera resolutions (Insta360 packed 1920 px and split 2880 px lenses).
+        with av.open(mp4_path) as container:
+            in_stream = container.streams.video[0]
+            ih, iw = in_stream.height, in_stream.width
         resize_tf = get_image_transform(
             in_res=(iw, ih),
             out_res=out_res

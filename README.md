@@ -77,26 +77,38 @@ Generate dataset for training.
 ```
 
 ### Using an Insta360 camera instead of a GoPro
-The pipeline also accepts `.insv` clips from an Insta360 X3 recorded in the packed dual-fisheye mode (one 3840x1920 video stream). Each clip carries 1000 Hz IMU data and Insta360's factory lens calibration. The pipeline keeps one lens, lens 1 by default, which faces the gripper on our mount.
+The pipeline also accepts takes from an Insta360 X3 in either of its two recording layouts:
+* **Packed.** One `.insv` per take with both lenses side by side in one stream, e.g. 3840x1920. Takes started over USB with `insta360_record.py` use this layout.
+* **Split.** One `.insv` per lens (`_00_`, `_10_`), e.g. 5.7K at 2880x2880 per lens. Takes started with the camera's own button in 5.7K video mode use this layout. The IMU and lens calibration of a split take are read from its LRV proxy, so a split take needs the lens file and the LRV.
 
-Build a calibration dir once per camera. Give it a clip where the camera is rotated briskly about all three axes for 20 to 60 seconds, so the camera-IMU rotation can be estimated from gyro against visual rotation:
+Each take carries 1000 Hz IMU data and Insta360's factory lens calibration. The pipeline keeps one lens, lens 1 by default, which faces the gripper on our mount. Both layouts are the same sensor crop at different sizes, so one calibration dir serves both.
+
+Build a calibration dir once per camera. Give it any file of a take where the camera is rotated briskly about all three axes for 20 to 60 seconds, so the camera-IMU rotation can be estimated from gyro against visual rotation:
 ```console
 (umi)$ python scripts/insta360_calibration.py -i VID_xxx.insv -o data/insta360_calib --lens 1
 ```
-Check `cam_imu_report.json`. If its `source` says `default`, the clip did not rotate enough to estimate from. For lens 1 the default rotation is the Basalt calibration of X3 `IAQEB2606EEWG9` from RoboManipBaselines. Lens 1 always takes its translation from that same calibration. For lens 0, or for another camera, the default is an unverified guess with zero translation.
+Check `cam_imu_report.json`. If its `source` says `default`, the clip did not rotate enough to estimate from. For lens 1 the default rotation is the Basalt calibration of X3 `IAQEB2606EEWG9` from RoboManipBaselines. Lens 1 always takes its translation from that same calibration. For lens 0, or for another camera, the default is an unverified guess with zero translation. Set your printed tag sizes in the dir's `aruco_config.yaml`; rerunning the script keeps that file.
 
-Record straight into a session with the camera on USB in Android mode, using the Python that has pyinsta360 installed (Python 3.10+). Each take records until Enter, or for `--seconds N`, and downloads the `.insv` under the name step 00 expects:
+The camera scripts need the Python that has pyinsta360 installed (Python 3.10+) and the camera on USB in Android mode.
+
+**Recording over USB.** Each take records until Enter, or for `--seconds N`, and downloads into the session:
 ```console
 $ python scripts/insta360_record.py <session> --kind mapping
 $ python scripts/insta360_record.py <session> --kind gripper_calibration
 $ python scripts/insta360_record.py <session>
 ```
 
-Or copy the session's `.insv` files into `<session>/raw_videos/` yourself. Then run the pipeline with that calibration dir:
+**Recording without a PC.** Select Video mode on the camera, record with its button, then connect it, list the takes on the card and import them by index and role. Only the files the pipeline needs are downloaded, and nothing is deleted from the camera:
+```console
+$ python scripts/insta360_import.py <session> --list
+$ python scripts/insta360_import.py <session> --mapping 13 --gripper-calibration 11 --demo 12 14-20
+```
+
+Both tools put a mapping take in `raw_videos/mapping/`, a gripper calibration take in `raw_videos/gripper_calibration/`, and demos in `raw_videos/`. Then run the pipeline with the calibration dir:
 ```console
 (umi)$ python run_slam_pipeline.py <session> -c data/insta360_calib
 ```
-`00_convert_insv.py` turns each clip into a single-lens `.mp4` and an `imu_data.json` with the same metadata GoPro files carry, then moves the `.insv` to `<session>/raw_insv/`. Steps 02 and 03 read `slam_setting.yaml` and `slam_mask.png` from the calibration dir. The mask covers only the area outside the lens field of view. Paint your gripper and fingers into it (255 = ignored) before mapping.
+`00_convert_insv.py` turns each take into a single-lens `.mp4` and an `imu_data.json` with the same metadata GoPro files carry, then moves the take's camera files to `<session>/raw_insv/`. Start times come from the camera's file names, which matched the PC clock to 1 s; the files' `creation_time` runs about 10 s early and is UTC or local time depending on how the take was started. Steps 02 and 03 read `slam_setting.yaml` and `slam_mask.png` from the calibration dir. The mask covers the area outside the lens field of view and the gripper on our mount (`GRIPPER_POLYGON` in `scripts/insta360_calibration.py`). Adjust it for yours (255 = ignored) before mapping.
 
 ## Training Diffusion Policy
 Single-GPU training. Tested to work on RTX3090 24GB.

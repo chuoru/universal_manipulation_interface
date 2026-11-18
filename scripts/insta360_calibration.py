@@ -28,7 +28,7 @@ import click
 import cv2
 import numpy as np
 from umi.common.insta360_util import (
-    read_insv, fit_kannala_brandt, lens_mask, orbslam_settings_yaml, openicc_intrinsics_json, DEG_TO_RAD)
+    find_recordings, read_insv, fit_kannala_brandt, lens_mask, orbslam_settings_yaml, openicc_intrinsics_json, DEG_TO_RAD)
 
 # Fallback when the clip has too little rotation to estimate from. Lens 1 is the
 # Basalt camera-IMU rotation of X3 IAQEB2606EEWG9 (RoboManipBaselines
@@ -51,14 +51,15 @@ MIN_ROTATION_RAD_S = 0.5
 MIN_PAIRS = 30
 
 
-def track_rotations(video_path, lens_idx, lens_size, kb, step, max_theta):
+def track_rotations(clip, kb, step, max_theta):
     """Per frame pair (t0_s, t1_s, rotation vector of the camera in its own frame)."""
+    lens_size = clip.lens.size
     scale = 960 / lens_size
     kb_s = kb.scaled(960, 960)
     K = np.array([[kb_s.fx, 0, kb_s.cx], [0, kb_s.fy, kb_s.cy], [0, 0, 1]])
     D = np.array(kb_s.k)
     r_max = kb_s.radius_px(max_theta)
-    cap = cv2.VideoCapture(str(video_path))
+    cap = cv2.VideoCapture(str(clip.video_path))
     fps = cap.get(cv2.CAP_PROP_FPS)
     prev, prev_idx, out, idx = None, None, [], 0
     while True:
@@ -66,7 +67,7 @@ def track_rotations(video_path, lens_idx, lens_size, kb, step, max_theta):
         if not ok:
             break
         if idx % step == 0:
-            x0 = lens_idx * lens_size
+            x0 = clip.crop_x
             gray = cv2.cvtColor(frame[:, x0:x0 + lens_size], cv2.COLOR_BGR2GRAY)
             gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
             if prev is not None:
@@ -124,8 +125,8 @@ def solve_rotation(cam_rv, imu_rv):
     return U @ S @ Vt
 
 
-def estimate_cam_imu(clip, lens_idx, kb, step, max_theta):
-    pairs = track_rotations(clip.path, lens_idx, clip.lenses[lens_idx].size, kb, step, max_theta)
+def estimate_cam_imu(clip, kb, step, max_theta):
+    pairs = track_rotations(clip, kb, step, max_theta)
     t_s = clip.imu_t_ms / 1000.0
     best = None
     for offset_ms in range(-60, 61, 2):
@@ -149,7 +150,7 @@ def estimate_cam_imu(clip, lens_idx, kb, step, max_theta):
 
 
 @click.command()
-@click.option('-i', '--input', 'insv_path', required=True, help='.insv clip from the camera to calibrate')
+@click.option('-i', '--input', 'insv_path', required=True, help='Any file of a take from the camera to calibrate (.insv or its LRV)')
 @click.option('-o', '--output_dir', required=True)
 @click.option('-l', '--lens', type=int, default=1, help='Lens index the pipeline uses (00_convert_insv.py --lens)')
 @click.option('--slam_size', type=int, default=960, help='Square image size ORB_SLAM3 tracks at')
@@ -157,17 +158,21 @@ def estimate_cam_imu(clip, lens_idx, kb, step, max_theta):
 @click.option('--no_gripper_mask', is_flag=True, default=False, help='Do not mask GRIPPER_POLYGON')
 @click.option('--frame_step', type=int, default=2, help='Estimate visual rotation every N frames')
 def main(insv_path, output_dir, lens, slam_size, max_fov_deg, no_gripper_mask, frame_step):
-    clip = read_insv(insv_path)
+    insv_path = pathlib.Path(insv_path).absolute()
+    rec = next((r for r in find_recordings(insv_path.parent, lens) if insv_path in r.files), None)
+    if rec is None:
+        raise SystemExit(f'{insv_path} is not part of a take found in {insv_path.parent}')
+    clip = read_insv(rec.telemetry, lens, rec.video)
     out = pathlib.Path(os.path.expanduser(output_dir)).absolute()
     out.mkdir(parents=True, exist_ok=True)
 
-    kb = fit_kannala_brandt(clip.lenses[lens])
+    kb = fit_kannala_brandt(clip.lens)
     print(f'{clip.camera_model} {clip.serial} lens {lens}: Kannala-Brandt fit max error {kb.max_fit_error_px:.3f} px '
           f'at {kb.width}x{kb.height}')
     max_theta = max_fov_deg * DEG_TO_RAD
 
-    est = estimate_cam_imu(clip, lens, kb, frame_step, max_theta)
-    report = {'insv': str(clip.path), 'serial': clip.serial, 'lens': lens}
+    est = estimate_cam_imu(clip, kb, frame_step, max_theta)
+    report = {'insv': str(clip.video_path), 'serial': clip.serial, 'lens': lens}
     if est is None:
         R_imu_cam = DEFAULT_R_IMU_CAM[lens]
         report['source'] = 'default: clip had too little rotation to estimate from; ' + ('Basalt calibration of X3 IAQEB2606EEWG9' if lens == 1 else 'unverified guess')
